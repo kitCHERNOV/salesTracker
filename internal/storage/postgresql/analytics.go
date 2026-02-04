@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// variable
+const packageOp = "storage.postgresql.analytics."
+
 // ====================================================================
 // ANALYTICS - Аналитические функции
 // ====================================================================
@@ -20,7 +23,7 @@ type PeriodSummary struct {
 
 // TotalRevenueByPeriod — получить сумму заказов за определенный период
 func (s *Storage) TotalRevenueByPeriod(start, end time.Time) (*PeriodSummary, error) {
-	const op = "storage.postgresql.analytics.TotalRevenueByPeriod"
+	const op = packageOp + "TotalRevenueByPeriod"
 	query := `SELECT SUM(total_amount), COUNT(*)
 			FROM orders
 			WHERE order_date BETWEEN $1 AND $2`
@@ -35,7 +38,7 @@ func (s *Storage) TotalRevenueByPeriod(start, end time.Time) (*PeriodSummary, er
 		return nil, fmt.Errorf("getting total revenue by period error; %s, %v", op, err)
 	}
 
-	if ordersAmount < 1 || totalRevenue < 0{
+	if ordersAmount < 1 || totalRevenue < 0 {
 		return nil, fmt.Errorf("invalid meaning; %s", op)
 	}
 	return &PeriodSummary{
@@ -55,14 +58,44 @@ type DailyOrders struct {
 
 // OrdersPerDay — количество заказов в день за период
 func (s *Storage) OrdersPerDay(start, end time.Time) ([]DailyOrders, error) {
+	const op = packageOp + "OrdersPerDay"
+	var dailyOrders []DailyOrders
+
+	query := `SELECT COUNT(*), SUM(total_amount)
+			FROM orders
+			WHERE order_date $1`
+
+	stmt, err := s.DB.Prepare(query)
+	if err != nil {
+		return nil, fmt.Errorf("%s,%v", op, err)
+	}
+
+	for curDate := start; !curDate.After(end); curDate = curDate.AddDate(0, 0, 1) {
+		var (
+			orderCount  int
+			totalAmount float64
+		)
+		row := stmt.QueryRow(curDate)
+		err = row.Scan(&orderCount, &totalAmount)
+		if err != nil {
+			return nil, fmt.Errorf("%s,%v", op, err)
+		}
+		dailyOrders = append(dailyOrders, DailyOrders{
+			Date:        curDate.Format("2006-01-02"),
+			OrderCount:  orderCount,
+			TotalAmount: totalAmount},
+		)
+	}
+
+	return dailyOrders, nil
 	// Mock implementation
-	return []DailyOrders{
-		{Date: "2024-01-15", OrderCount: 12, TotalAmount: 125000.50},
-		{Date: "2024-01-16", OrderCount: 15, TotalAmount: 187500.00},
-		{Date: "2024-01-17", OrderCount: 8, TotalAmount: 95000.00},
-		{Date: "2024-01-18", OrderCount: 20, TotalAmount: 250000.00},
-		{Date: "2024-01-19", OrderCount: 18, TotalAmount: 210000.00},
-	}, nil
+	//return []DailyOrders{
+	//	{Date: "2024-01-15", OrderCount: 12, TotalAmount: 125000.50},
+	//	{Date: "2024-01-16", OrderCount: 15, TotalAmount: 187500.00},
+	//	{Date: "2024-01-17", OrderCount: 8, TotalAmount: 95000.00},
+	//	{Date: "2024-01-18", OrderCount: 20, TotalAmount: 250000.00},
+	//	{Date: "2024-01-19", OrderCount: 18, TotalAmount: 210000.00},
+	//}, nil
 }
 
 // AverageCheck — средний чек за период
