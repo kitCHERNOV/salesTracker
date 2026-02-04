@@ -1,5 +1,6 @@
 package main
 
 func main() {
-	service := NewSalesService()
+	storage := NewSalesService()
+	Run(":8080", storage)
 }

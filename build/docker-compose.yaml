@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres_db:
+    image: postgres:17-alpine # last stable version
+    container_name: postgres_container
+    environment:
+      POSTGRES_DB: myapp_db
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+    ports:
+      - "5439:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped  # Автоматический перезапуск контейнера, кроме случаев, когда он был явно остановлен
+
+volumes:
+  postgres_data:  # Определяем именованный том Docker для хранения данных БД
