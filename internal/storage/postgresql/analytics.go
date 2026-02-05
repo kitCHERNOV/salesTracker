@@ -3,6 +3,7 @@ package postgresql
 import (
 	"fmt"
 	_ "github.com/lib/pq"
+	"math"
 	"time"
 )
 
@@ -109,14 +110,61 @@ type AverageCheckStats struct {
 
 // AverageCheckByPeriod — средний чек за определенный период
 func (s *Storage) AverageCheckByPeriod(start, end time.Time) (*AverageCheckStats, error) {
-	// Mock implementation
+	const op = "AverageCheckByPeriod"
+	query := `SELECT COUNT(*), SUM(total_amount), MIN(total_amount), MAX(total_amount)
+			FROM orders
+			WHERE order_date $1`
+
+	stmt, err := s.DB.Prepare(query)
+	if err != nil {
+		return nil, fmt.Errorf("%s,%v", op, err)
+	}
+
+	var MinCheckTotally = math.MaxFloat64
+	var MaxCheckTotally = -1.
+	var SumOfBills = 0.
+	var ordersAmount = 0
+
+	for curDate := start; !curDate.After(end); curDate = curDate.AddDate(0, 0, 1) {
+		var (
+			orderCount  int
+			totalAmount float64
+			minCheck    float64
+			maxCheck    float64
+		)
+		row := stmt.QueryRow(curDate)
+		err = row.Scan(&orderCount, &totalAmount, &minCheck, &maxCheck)
+		if err != nil {
+			return nil, fmt.Errorf("%s,%v", op, err)
+		}
+
+		if minCheck < MinCheckTotally {
+			MinCheckTotally = minCheck
+		}
+		if maxCheck > MaxCheckTotally {
+			MaxCheckTotally = maxCheck
+		}
+
+		SumOfBills = SumOfBills + totalAmount
+		ordersAmount += orderCount
+	}
+
 	return &AverageCheckStats{
 		StartDate:    start,
 		EndDate:      end,
-		AverageCheck: 8500.00,
-		MinCheck:     450.00,
-		MaxCheck:     125000.00,
+		AverageCheck: SumOfBills / float64(ordersAmount),
+		MinCheck:     MinCheckTotally,
+		MaxCheck:     MaxCheckTotally,
 	}, nil
+
+	// Mock implementation
+	//return &AverageCheckStats{
+	//	StartDate:    start,
+	//	EndDate:      end,
+	//	AverageCheck: 8500.00,
+	//	MinCheck:     450.00,
+	//	MaxCheck:     125000.00,
+	//}, nil
 }
 
 // MedianStats — результаты расчета медианы
