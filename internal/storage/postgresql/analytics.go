@@ -110,7 +110,7 @@ type AverageCheckStats struct {
 
 // AverageCheckByPeriod — средний чек за определенный период
 func (s *Storage) AverageCheckByPeriod(start, end time.Time) (*AverageCheckStats, error) {
-	const op = "AverageCheckByPeriod"
+	const op = packageOp + "AverageCheckByPeriod"
 	query := `SELECT COUNT(*), SUM(total_amount), MIN(total_amount), MAX(total_amount)
 			FROM orders
 			WHERE order_date $1`
@@ -174,14 +174,52 @@ type MedianStats struct {
 	SampleSize int     `json:"sample_size"`
 }
 
-// OrdersMedian — медиана суммы заказов за период
+// OrdersMedian — медиана суммы заказов за период по дням
 func (s *Storage) OrdersMedian(start, end time.Time) (*MedianStats, error) {
-	// Mock implementation
+	const op = packageOp + "OrdersMedian"
+	query := `SELECT total_amount
+		FROM orders
+		WHERE order_date = $1`
+
+	stmt, err := s.DB.Prepare(query)
+	if err != nil {
+		return nil, fmt.Errorf("%s, %v", op, err)
+	}
+
+	total_amounts := make([]float64, 0)
+	days_shift := int(end.Sub(start).Hours() / 24)
+
+	for currentDate := start; !currentDate.After(end); currentDate = currentDate.AddDate(0, 0, 1) {
+		rows, err := stmt.Query(currentDate)
+		if err != nil {
+			return nil, fmt.Errorf("%s, %v", op, err)
+		}
+
+		defer rows.Close()
+
+		for rows.Next() {
+			var orderTotalAmount float64
+			err = rows.Scan(&orderTotalAmount)
+			if err != nil {
+				return nil, fmt.Errorf("%s, %v", op, err)
+			}
+			total_amounts = append(total_amounts, orderTotalAmount)
+		}
+
+	}
+
 	return &MedianStats{
 		Metric:     "order_total",
 		Median:     7200.00,
-		SampleSize: 150,
+		SampleSize: days_shift,
 	}, nil
+
+	// Mock implementation
+	//return &MedianStats{
+	//	Metric:     "order_total",
+	//	Median:     7200.00,
+	//	SampleSize: 150,
+	//}, nil
 }
 
 // CustomerSpendingMedian — медиана трат покупателей за период
