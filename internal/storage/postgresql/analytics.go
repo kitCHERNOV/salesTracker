@@ -221,7 +221,11 @@ func (s *Storage) OrdersMedian(start, end time.Time) (*MedianStats, error) {
 	//	SampleSize: 150,
 	//}, nil
 }
-
+/*
+TODO: implement CustomerSpendingMedian:
+- add sql request to get data
+- add math logic to compute customer spending median
+*/
 // CustomerSpendingMedian — медиана трат покупателей за период
 func (s *Storage) CustomerSpendingMedian(start, end time.Time) (*MedianStats, error) {
 	// Mock implementation
@@ -240,27 +244,71 @@ type PercentileStats struct {
 	SampleSize int     `json:"sample_size"`
 }
 
+// TODO: add orders percentili implemention
 // OrdersPercentile — перцентиль суммы заказов за период
 func (s *Storage) OrdersPercentile(start, end time.Time, percentile int) (*PercentileStats, error) {
-	// Mock implementation
-	mockValues := map[int]float64{
-		50: 7200.00,  // медиана
-		75: 12000.00, // третий квартиль
-		90: 18500.00,
-		95: 25000.00,
-		99: 45000.00,
+	const op = packageOp + "OrdersPercentile"
+	
+	// Validate percentile range
+	if percentile < 0 || percentile > 100 {
+		return nil, fmt.Errorf("%s, percentile must be between 0 and 100", op)
 	}
 
-	value := mockValues[percentile]
-	if value == 0 {
-		value = 10000.00 // default
+	query := `SELECT total_amount
+		FROM orders
+		WHERE order_date BETWEEN $1 AND $2
+		ORDER BY total_amount ASC`
+
+	rows, err := s.DB.Query(query, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("%s, %v", op, err)
 	}
+	defer rows.Close()
+
+	// Collect all total_amount values
+	totalAmounts := make([]float64, 0)
+	for rows.Next() {
+		var totalAmount float64
+		err := rows.Scan(&totalAmount)
+		if err != nil {
+			return nil, fmt.Errorf("%s, %v", op, err)
+		}
+		totalAmounts = append(totalAmounts, totalAmount)
+	}
+
+	// Check for errors during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s, %v", op, err)
+	}
+
+	sampleSize := len(totalAmounts)
+	if sampleSize == 0 {
+		return nil, fmt.Errorf("%s, no orders found in the specified period", op)
+	}
+
+	// Calculate percentile using linear interpolation method
+	// Formula: percentile_value = values[floor((n-1)*p/100)] + ((n-1)*p/100 - floor((n-1)*p/100)) * (values[floor((n-1)*p/100)+1] - values[floor((n-1)*p/100)])
+	
+	// Values are already sorted by ORDER BY in the query
+	n := float64(sampleSize - 1)
+	pos := n * float64(percentile) / 100.0
+	lowerIndex := int(math.Floor(pos))
+	upperIndex := int(math.Ceil(pos))
+	
+	// Handle edge case where upperIndex equals sampleSize
+	if upperIndex >= sampleSize {
+		upperIndex = sampleSize - 1
+	}
+
+	// Interpolate between values
+	fraction := pos - float64(lowerIndex)
+	percentileValue := totalAmounts[lowerIndex] + fraction*(totalAmounts[upperIndex]-totalAmounts[lowerIndex])
 
 	return &PercentileStats{
 		Metric:     "order_total",
 		Percentile: percentile,
-		Value:      value,
-		SampleSize: 150,
+		Value:      percentileValue,
+		SampleSize: sampleSize,
 	}, nil
 }
 
