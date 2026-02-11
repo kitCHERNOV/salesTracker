@@ -3,6 +3,7 @@ package postgresql
 import (
 	"fmt"
 	_ "github.com/lib/pq"
+	"gonum.org/v1/gonum/stat"
 	"math"
 	"time"
 )
@@ -221,6 +222,7 @@ func (s *Storage) OrdersMedian(start, end time.Time) (*MedianStats, error) {
 	//	SampleSize: 150,
 	//}, nil
 }
+
 /*
 TODO: implement CustomerSpendingMedian:
 - add sql request to get data
@@ -228,11 +230,46 @@ TODO: implement CustomerSpendingMedian:
 */
 // CustomerSpendingMedian — медиана трат покупателей за период
 func (s *Storage) CustomerSpendingMedian(start, end time.Time) (*MedianStats, error) {
-	// Mock implementation
+	const op = packageOp + "CustomerSpendingMedian"
+
+	query := `SELECT total_amount
+		FROM orders
+		WHERE order_date BETWEEN $1 AND $2
+		ORDER BY total_amount ASC`
+
+	rows, err := s.DB.Query(query, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("%s, %v", op, err)
+	}
+	defer rows.Close()
+
+	// Collect all total_amount values
+	totalAmounts := make([]float64, 0)
+	for rows.Next() {
+		var totalAmount float64
+		err := rows.Scan(&totalAmount)
+		if err != nil {
+			return nil, fmt.Errorf("%s, %v", op, err)
+		}
+		totalAmounts = append(totalAmounts, totalAmount)
+	}
+
+	// Check for errors during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s, %v", op, err)
+	}
+
+	samplesSize := len(totalAmounts)
+	if samplesSize == 0 {
+		return nil, fmt.Errorf("%s, %s", op, "there are not orders")
+	}
+
+	median := stat.Quantile(0.5, stat.Empirical, totalAmounts, nil)
+
 	return &MedianStats{
 		Metric:     "customer_spending",
-		Median:     12500.00,
-		SampleSize: 85,
+		Median:     median,
+		SampleSize: samplesSize,
 	}, nil
 }
 
@@ -244,11 +281,10 @@ type PercentileStats struct {
 	SampleSize int     `json:"sample_size"`
 }
 
-// TODO: add orders percentili implemention
 // OrdersPercentile — перцентиль суммы заказов за период
 func (s *Storage) OrdersPercentile(start, end time.Time, percentile int) (*PercentileStats, error) {
 	const op = packageOp + "OrdersPercentile"
-	
+
 	// Validate percentile range
 	if percentile < 0 || percentile > 100 {
 		return nil, fmt.Errorf("%s, percentile must be between 0 and 100", op)
@@ -288,13 +324,13 @@ func (s *Storage) OrdersPercentile(start, end time.Time, percentile int) (*Perce
 
 	// Calculate percentile using linear interpolation method
 	// Formula: percentile_value = values[floor((n-1)*p/100)] + ((n-1)*p/100 - floor((n-1)*p/100)) * (values[floor((n-1)*p/100)+1] - values[floor((n-1)*p/100)])
-	
+
 	// Values are already sorted by ORDER BY in the query
 	n := float64(sampleSize - 1)
 	pos := n * float64(percentile) / 100.0
 	lowerIndex := int(math.Floor(pos))
 	upperIndex := int(math.Ceil(pos))
-	
+
 	// Handle edge case where upperIndex equals sampleSize
 	if upperIndex >= sampleSize {
 		upperIndex = sampleSize - 1
